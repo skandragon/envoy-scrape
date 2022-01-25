@@ -24,12 +24,12 @@ IMAGE_PREFIX=docker.flame.org/library/
 #
 
 # These are targets for "make local"
-BINARIES = stormdriver
+BINARIES = envoy-receiver envoy-scraper
 
 # These are the targets for Docker images, used both for the multi-arch and
 # single (local) Docker builds.
 # Dockerfiles should have a target that ends in -image, e.g. stormdriver-image.
-IMAGE_TARGETS = stormdriver
+IMAGE_TARGETS = envoy-receiver envoy-scraper
 #
 # Below here lies magic...
 #
@@ -65,30 +65,16 @@ bin/%:: ${all_deps}
 # Multi-architecture image builds
 #
 .PHONY: images-ma
-images-ma: buildtime $(addsuffix -ma.ts, $(addprefix buildtime/,$(IMAGE_TARGETS)))
+images: buildtime $(addsuffix -ma.ts, $(addprefix buildtime/,$(IMAGE_TARGETS)))
 
 buildtime/%-ma.ts:: ${all_deps} Dockerfile.multi
 	${BUILDX} \
-		--tag ${IMAGE_PREFIX}stormdriver-$(patsubst %-ma.ts,%,$(@F)):latest \
-		--tag ${IMAGE_PREFIX}stormdriver-$(patsubst %-ma.ts,%,$(@F)):v${now} \
+		--tag ${IMAGE_PREFIX}$(patsubst %-ma.ts,%,$(@F)):latest \
+		--tag ${IMAGE_PREFIX}$(patsubst %-ma.ts,%,$(@F)):v${now} \
 		--target $(patsubst %-ma.ts,%,$(@F))-image \
-		-f Dockerfile.multi \
+		-f Dockerfile \
 		--push .
 	@touch $@
-
-#
-# Standard "whatever we are on now" image builds
-#
-.PHONY: images
-images: $(addsuffix .ts, $(addprefix buildtime/,$(IMAGE_TARGETS)))
-
-buildtime/%.ts:: buildtime ${all_deps} Dockerfile
-	docker build \
-		--tag ${IMAGE_PREFIX}stormdriver-$(patsubst %.ts,%,$(@F)):latest \
-		--tag ${IMAGE_PREFIX}stormdriver-$(patsubst %.ts,%,$(@F)):v${now} \
-		--target $(patsubst %.ts,%,$(@F))-image \
-		.
-	touch $@
 
 #
 # Test targets
