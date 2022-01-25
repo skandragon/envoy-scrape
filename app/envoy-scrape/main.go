@@ -67,6 +67,13 @@ func main() {
 
 	flag.Parse()
 
+	if *serial == "" {
+		*serial = os.Getenv("ENVOY_SERIAL")
+	}
+	if *host == "" {
+		*host = os.Getenv("ENVOY_HOST")
+	}
+
 	if *serial == "" || *host == "" {
 		flag.Usage()
 		os.Exit(-1)
