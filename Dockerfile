@@ -37,10 +37,13 @@ RUN mkdir /out
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/envoy-receiver app/envoy-receiver/*.go
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/envoy-scraper app/envoy-scraper/*.go
 
+FROM scratch AS base-image
+COPY --from=alpine:3.15 /etc/ssl/cert.pem /etc/ssl/cert.pem
+
 #
 # Build the receiver image.  This should be a --target on docker build.
 #
-FROM scratch AS envoy-receiver-image
+FROM base-image AS envoy-receiver-image
 WORKDIR /app
 COPY --from=build-binaries /out/envoy-receiver /app
 EXPOSE 3000
@@ -49,7 +52,7 @@ CMD ["/app/envoy-receiver"]
 #
 # Build the receiver image.  This should be a --target on docker build.
 #
-FROM scratch AS envoy-scraper-image
+FROM base-image AS envoy-scraper-image
 WORKDIR /app
 COPY --from=build-binaries /out/envoy-scraper /app
 CMD ["/app/envoy-scraper"]
