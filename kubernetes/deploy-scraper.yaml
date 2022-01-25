@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy-scraper
+  namespace: envoy
+  labels:
+    app: envoy-scraper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: envoy-scraper
+  template:
+    metadata:
+      labels:
+        app: envoy-scraper
+    spec:
+      containers:
+      - name: envoy-scraper
+        image: docker.flame.org/library/envoy-scraper
+        imagePullPolicy: Always
+        env:
+          - name: ENVOY_HOST
+            value: "10.44.100.1"
+          - name: ENVOY_SERIAL
+            value: "***REMOVED***"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "16M"
+          limits:
+            cpu: "500m"
+            memory: "32M"
