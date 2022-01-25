@@ -64,14 +64,14 @@ bin/%:: ${all_deps}
 #
 # Multi-architecture image builds
 #
-.PHONY: images-ma
-images: buildtime $(addsuffix -ma.ts, $(addprefix buildtime/,$(IMAGE_TARGETS)))
+.PHONY: images
+images: buildtime $(addsuffix .ts, $(addprefix buildtime/,$(IMAGE_TARGETS)))
 
-buildtime/%-ma.ts:: ${all_deps} Dockerfile.multi
+buildtime/%.ts:: ${all_deps} Dockerfile docker/run.sh
 	${BUILDX} \
-		--tag ${IMAGE_PREFIX}$(patsubst %-ma.ts,%,$(@F)):latest \
-		--tag ${IMAGE_PREFIX}$(patsubst %-ma.ts,%,$(@F)):v${now} \
-		--target $(patsubst %-ma.ts,%,$(@F))-image \
+		--tag ${IMAGE_PREFIX}$(patsubst %.ts,%,$(@F)):latest \
+		--tag ${IMAGE_PREFIX}$(patsubst %.ts,%,$(@F)):v${now} \
+		--target $(patsubst %.ts,%,$(@F))-image \
 		-f Dockerfile \
 		--push .
 	@touch $@
