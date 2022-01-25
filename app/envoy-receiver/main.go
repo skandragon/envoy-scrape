@@ -89,7 +89,6 @@ func (a *App) process(sub submission) {
 		ts := time.Unix(int64(i.LastReportDate), 0)
 		p := influxdb2.NewPoint("inverterPower", tags, fields, ts)
 		writeAPI.WritePoint(p)
-		//log.Printf("tags: %#v\nfields: %#v\n%s\n", tags, fields, ts)
 	}
 
 	writeAPI.Flush()
