@@ -39,8 +39,8 @@ func updateInverters(i inverterReport) bool {
 	return true
 }
 
-//const submitURL = "https://iot.flame.org/envoy/in"
-const submitURL = "http://localhost:3000/envoy/in"
+//const submitURL = "https://iot.flame.org/api/v1/envoy/inverters"
+const submitURL = "http://localhost:3000/api/v1/envoy/inverters"
 
 func sendUpdate(serial string, i []inverterReport) {
 	sub := submission{serial, i}
