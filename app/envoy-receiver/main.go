@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -29,7 +30,7 @@ func (a *App) routes(mux *mux.Router) {
 	mux.Use(loggingMiddleware)
 
 	mux.HandleFunc("/health", a.healthchecker.HTTPHandler()).Methods(http.MethodGet)
-	mux.HandleFunc("/api/v1/envoy/inverters", a.envoyReceive).Methods(http.MethodPost)
+	mux.HandleFunc("/api/v1/inverters", a.envoyReceive).Methods(http.MethodPost)
 }
 
 type inverterReport struct {
@@ -95,7 +96,9 @@ func (a *App) process(sub submission) {
 }
 
 func main() {
-	listenAddress := ":3000"
+	listenAddress := flag.String("listenAddress", ":3100", "listen on this address/port")
+
+	flag.Parse()
 
 	dbopt := influxdb2.DefaultOptions().SetBatchSize(20)
 	token := "***REMOVED***"
@@ -109,10 +112,10 @@ func main() {
 	app.routes(m)
 
 	srv := &http.Server{
-		Addr:    listenAddress,
+		Addr:    *listenAddress,
 		Handler: m,
 	}
 
-	log.Printf("Starting HTTP listener on %s", listenAddress)
+	log.Printf("Starting HTTP listener on %s", *listenAddress)
 	log.Fatal(srv.ListenAndServe())
 }

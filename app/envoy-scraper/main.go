@@ -61,7 +61,7 @@ func main() {
 	username := flag.String("username", "installer", "username to connect to the Envoy")
 	serial := flag.String("serial", "", "serial number of the Envoy")
 	host := flag.String("host", "", "the hostname or IP address of the Envoy")
-	url := flag.String("url", "https://iot.flame.org/api/v1/envoy/inverters", "the URL to post data to")
+	url := flag.String("url", "https://iot.flame.org/envoy/api/v1/inverters", "the URL to post data to")
 
 	flag.Parse()
 
