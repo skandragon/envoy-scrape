@@ -1,5 +1,5 @@
 #
-# Copyright 2021 OpsMx, Inc.
+# Copyright Copyright 2022 Michael Graff
 #
 # Licensed under the Apache License, Version 2.0 (the "License")
 # you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 # Install the latest versions of our mods.  This is done as a separate step
 # so it will pull from an image cache if possible, unless there are changes.
 #
-FROM --platform=${BUILDPLATFORM} golang:1.17.6-alpine3.15 AS buildmod
+FROM --platform=${BUILDPLATFORM} golang:1.17-alpine AS buildmod
 ENV CGO_ENABLED=0
 RUN mkdir /build
 WORKDIR /build
@@ -38,7 +38,7 @@ RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/envo
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/envoy-scraper app/envoy-scraper/*.go
 
 FROM scratch AS base-image
-COPY --from=alpine:3.15 /etc/ssl/cert.pem /etc/ssl/cert.pem
+COPY --from=alpine:3 /etc/ssl/cert.pem /etc/ssl/cert.pem
 
 #
 # Build the receiver image.  This should be a --target on docker build.
