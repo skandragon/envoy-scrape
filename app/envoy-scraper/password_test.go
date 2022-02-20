@@ -44,8 +44,6 @@ func Test_makePasswordFromHash(t *testing.T) {
 }
 
 func Test_makePasswordForSerial(t *testing.T) {
-	type args struct {
-	}
 	tests := []struct {
 		serial   string
 		username string

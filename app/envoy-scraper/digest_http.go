@@ -25,13 +25,14 @@ func digestGet(username string, password string, uri string) (int, []byte, error
 		body, err := io.ReadAll(resp.Body)
 		return resp.StatusCode, body, err
 	}
-	digestParts := digestParts(resp)
+	digestParts := getDigestParts(resp.Header)
 	digestParts["uri"] = req.RequestURI
 	digestParts["method"] = method
 	digestParts["username"] = username
 	digestParts["password"] = password
 	req, err = http.NewRequest(method, uri, nil)
-	req.Header.Set("Authorization", getDigestAuthrization(digestParts))
+	cnonce := getCnonce()
+	req.Header.Set("Authorization", getDigestAuthorization(cnonce, digestParts))
 
 	resp, err = client.Do(req)
 	if err != nil {
@@ -45,11 +46,11 @@ func digestGet(username string, password string, uri string) (int, []byte, error
 	return resp.StatusCode, body, err
 }
 
-func digestParts(resp *http.Response) map[string]string {
+func getDigestParts(headers http.Header) map[string]string {
 	result := map[string]string{}
-	if len(resp.Header["Www-Authenticate"]) > 0 {
+	if len(headers["Www-Authenticate"]) > 0 {
 		wantedHeaders := []string{"nonce", "realm", "qop"}
-		responseHeaders := strings.Split(resp.Header["Www-Authenticate"][0], ",")
+		responseHeaders := strings.Split(headers["Www-Authenticate"][0], ",")
 		for _, r := range responseHeaders {
 			for _, w := range wantedHeaders {
 				if strings.Contains(r, w) {
@@ -73,12 +74,12 @@ func getCnonce() string {
 	return fmt.Sprintf("%x", b)[:16]
 }
 
-func getDigestAuthrization(digestParts map[string]string) string {
+// getDigestAuthorization does not implement the full spec, but it works for this use case.
+func getDigestAuthorization(cnonce string, digestParts map[string]string) string {
 	d := digestParts
 	ha1 := getMD5(d["username"] + ":" + d["realm"] + ":" + d["password"])
 	ha2 := getMD5(d["method"] + ":" + d["uri"])
-	nonceCount := 00000001
-	cnonce := getCnonce()
+	nonceCount := 1
 	response := getMD5(fmt.Sprintf("%s:%s:%v:%s:%s:%s", ha1, d["nonce"], nonceCount, cnonce, d["qop"], ha2))
 	authorization := fmt.Sprintf(`Digest username="%s", realm="%s", nonce="%s", uri="%s", cnonce="%s", nc="%v", qop="%s", response="%s"`,
 		d["username"], d["realm"], d["nonce"], d["uri"], cnonce, nonceCount, d["qop"], response)
