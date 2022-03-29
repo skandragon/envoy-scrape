@@ -20,6 +20,7 @@ import (
 type App struct {
 	healthchecker *health.Health
 	db            influxdb2.Client
+	secret        string
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {
@@ -47,6 +48,13 @@ type submission struct {
 }
 
 func (a *App) envoyReceive(w http.ResponseWriter, req *http.Request) {
+	if a.secret != "" {
+		foundSecret := req.Header.Get("x-flameorg-auth")
+		if foundSecret != a.secret {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+		}
+	}
+
 	w.Header().Set("content-type", "application/json")
 
 	defer req.Body.Close()
@@ -100,11 +108,26 @@ func main() {
 
 	flag.Parse()
 
+	influxToken, found := os.LookupEnv("ENVOY_INFLUX_TOKEN")
+	if !found {
+		log.Fatal("ENVOY_INFLUX_TOKEN envar not set")
+	}
+
+	influxURL, found := os.LookupEnv("ENVOY_INFLUX_URL")
+	if !found {
+		log.Fatal("ENVOY_INFLUX_URL envar not set")
+	}
+
+	secret, found := os.LookupEnv("ENVOY_RECEIVER_SECRET")
+	if !found {
+		log.Fatal("ENVOY_RECEIVER_SECRET envar not set")
+	}
+
 	dbopt := influxdb2.DefaultOptions().SetBatchSize(20)
-	token := "***REMOVED***"
 	app := &App{
 		healthchecker: health.MakeHealth(),
-		db:            influxdb2.NewClientWithOptions("http://localhost:8086", token, dbopt),
+		db:            influxdb2.NewClientWithOptions(influxURL, influxToken, dbopt),
+		secret:        secret,
 	}
 	go app.healthchecker.RunCheckers(15)
 
