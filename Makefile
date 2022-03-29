@@ -67,7 +67,7 @@ bin/%:: ${all_deps}
 .PHONY: images
 images: buildtime $(addsuffix .ts, $(addprefix buildtime/,$(IMAGE_TARGETS)))
 
-buildtime/%.ts:: ${all_deps} Dockerfile docker/run.sh
+buildtime/%.ts:: ${all_deps} Dockerfile
 	${BUILDX} \
 		--tag ${IMAGE_PREFIX}$(patsubst %.ts,%,$(@F)):latest \
 		--tag ${IMAGE_PREFIX}$(patsubst %.ts,%,$(@F)):v${now} \
