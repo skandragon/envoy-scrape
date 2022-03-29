@@ -85,7 +85,7 @@ func main() {
 		*url = os.Getenv("ENVOY_RECEIVER_URL")
 	}
 	if *secret == "" {
-		*url = os.Getenv("ENVOY_RECEIVER_SECRET")
+		*secret = os.Getenv("ENVOY_RECEIVER_SECRET")
 	}
 
 	if *serial == "" || *host == "" || *url == "" || *secret == "" {
