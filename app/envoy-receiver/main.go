@@ -48,12 +48,11 @@ type submission struct {
 }
 
 func (a *App) envoyReceive(w http.ResponseWriter, req *http.Request) {
-	if a.secret != "" {
-		foundSecret := req.Header.Get("x-flameorg-auth")
-		if foundSecret != a.secret {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
+	foundSecret := req.Header.Get("x-flameorg-auth")
+	if foundSecret != a.secret {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		log.Println("Forbidden")
+		return
 	}
 
 	w.Header().Set("content-type", "application/json")
