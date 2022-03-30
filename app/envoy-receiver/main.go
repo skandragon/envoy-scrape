@@ -52,6 +52,7 @@ func (a *App) envoyReceive(w http.ResponseWriter, req *http.Request) {
 		foundSecret := req.Header.Get("x-flameorg-auth")
 		if foundSecret != a.secret {
 			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
 		}
 	}
 
