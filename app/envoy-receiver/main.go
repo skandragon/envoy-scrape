@@ -135,8 +135,11 @@ func main() {
 	app.routes(m)
 
 	srv := &http.Server{
-		Addr:    *listenAddress,
-		Handler: m,
+		Addr:         *listenAddress,
+		Handler:      m,
+		ReadTimeout:  5 * time.Second,
+		IdleTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
 	}
 
 	log.Printf("Starting HTTP listener on %s", *listenAddress)

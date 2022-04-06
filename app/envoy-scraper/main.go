@@ -55,7 +55,11 @@ func sendUpdate(url string, secret string, serial string, i []inverterReport) {
 	req.Header.Add("content-type", "application/json")
 	req.Header.Add("x-flameorg-auth", secret)
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("%v", err)
 		return

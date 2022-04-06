@@ -9,13 +9,16 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func digestGet(username string, password string, uri string) (int, []byte, error) {
 	method := "GET"
 	req, err := http.NewRequest(method, uri, nil)
 	req.Header.Set("Accepts", "application/json")
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return -1, []byte{}, err
