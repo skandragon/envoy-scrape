@@ -31,13 +31,16 @@ import (
 func digestGet(username string, password string, uri string) (int, []byte, error) {
 	method := "GET"
 	req, err := http.NewRequest(method, uri, nil)
+	if err != nil {
+		return -1, nil, err
+	}
 	req.Header.Set("Accepts", "application/json")
 	client := &http.Client{
 		Timeout: 15 * time.Second,
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return -1, []byte{}, err
+		return -1, nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -50,6 +53,9 @@ func digestGet(username string, password string, uri string) (int, []byte, error
 	digestParts["username"] = username
 	digestParts["password"] = password
 	req, err = http.NewRequest(method, uri, nil)
+	if err != nil {
+		return -1, nil, err
+	}
 	cnonce := getCnonce()
 	req.Header.Set("Authorization", getDigestAuthorization(cnonce, digestParts))
 
