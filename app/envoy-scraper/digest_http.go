@@ -22,7 +22,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -64,7 +64,7 @@ func digestGet(username string, password string, uri string) (int, []byte, error
 		return -1, []byte{}, err
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return -1, []byte{}, err
 	}
@@ -95,7 +95,10 @@ func getMD5(text string) string {
 
 func getCnonce() string {
 	b := make([]byte, 8)
-	io.ReadFull(rand.Reader, b)
+	_, err := io.ReadFull(rand.Reader, b)
+	if err != nil {
+		log.Printf("Reading nonce: %v", err)
+	}
 	return fmt.Sprintf("%x", b)[:16]
 }
 
