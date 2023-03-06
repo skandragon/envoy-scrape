@@ -1,6 +1,6 @@
 module github.com/skandragon/envoy-scrape
 
-go 1.19
+go 1.20
 
 require (
 	github.com/gorilla/handlers v1.5.1
@@ -19,6 +19,6 @@ require (
 	github.com/influxdata/line-protocol v0.0.0-20210922203350-b1ad95c89adf // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	golang.org/x/net v0.6.0 // indirect
+	golang.org/x/net v0.8.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
