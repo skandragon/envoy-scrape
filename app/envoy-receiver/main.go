@@ -17,37 +17,26 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
-	"github.com/gorilla/handlers"
-	"github.com/gorilla/mux"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	flogger "github.com/gofiber/fiber/v2/middleware/logger"
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 	"github.com/skandragon/gohealthcheck/health"
+	"github.com/valyala/fasthttp/fasthttpadaptor"
 )
 
-// App holds application shared state.
-type App struct {
+// Server holds application shared state.
+type Server struct {
 	healthchecker *health.Health
 	db            influxdb2.Client
 	secret        string
-}
-
-func loggingMiddleware(next http.Handler) http.Handler {
-	return handlers.LoggingHandler(os.Stdout, next)
-}
-
-func (a *App) routes(mux *mux.Router) {
-	mux.Use(loggingMiddleware)
-
-	mux.HandleFunc("/health", a.healthchecker.HTTPHandler()).Methods(http.MethodGet)
-	mux.HandleFunc("/api/v1/inverters", a.envoyReceive).Methods(http.MethodPost)
 }
 
 type inverterReport struct {
@@ -63,36 +52,25 @@ type submission struct {
 	Inverters   []inverterReport `json:"inverters,omitempty"`
 }
 
-func (a *App) envoyReceive(w http.ResponseWriter, req *http.Request) {
-	foundSecret := req.Header.Get("x-flameorg-auth")
+func (a *Server) envoyReceive(c *fiber.Ctx) error {
+	c.Accepts("application/json")
+	c.Type("json", "utf-8")
+
+	foundSecret := c.Get("x-flameorg-auth")
 	if foundSecret != a.secret {
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		log.Println("Forbidden")
-		return
+		return fiber.ErrForbidden
 	}
 
-	w.Header().Set("content-type", "application/json")
-
-	defer req.Body.Close()
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		log.Printf("While reading body: %v", err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
 	sub := submission{}
-	err = json.Unmarshal(body, &sub)
-	if err != nil {
-		log.Printf("While cracking json open: %v", err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
+	if err := c.BodyParser(&sub); err != nil {
+		return err
 	}
 
 	a.process(sub)
-	w.WriteHeader(http.StatusOK)
+	return nil
 }
 
-func (a *App) process(sub submission) {
+func (a *Server) process(sub submission) {
 	writeAPI := a.db.WriteAPI("flame", "envoy")
 	errorsCh := writeAPI.Errors()
 	go func() {
@@ -119,6 +97,13 @@ func (a *App) process(sub submission) {
 	writeAPI.Flush()
 }
 
+func WrapHandler(f http.HandlerFunc) func(ctx *fiber.Ctx) error {
+	return func(ctx *fiber.Ctx) error {
+		fasthttpadaptor.NewFastHTTPHandler(f)(ctx.Context())
+		return nil
+	}
+}
+
 func main() {
 	listenAddress := flag.String("listenAddress", ":3100", "listen on this address/port")
 
@@ -140,24 +125,31 @@ func main() {
 	}
 
 	dbopt := influxdb2.DefaultOptions().SetBatchSize(20)
-	app := &App{
+	server := &Server{
 		healthchecker: health.MakeHealth(),
 		db:            influxdb2.NewClientWithOptions(influxURL, influxToken, dbopt),
 		secret:        secret,
 	}
-	go app.healthchecker.RunCheckers(15)
+	go server.healthchecker.RunCheckers(15)
 
-	m := mux.NewRouter()
-	app.routes(m)
-
-	srv := &http.Server{
-		Addr:         *listenAddress,
-		Handler:      m,
+	app := fiber.New(fiber.Config{
 		ReadTimeout:  5 * time.Second,
 		IdleTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
-	}
+	})
+
+	app.Use(flogger.New())
+
+	app.Use(cors.New(cors.Config{
+		AllowOrigins: "https://gofiber.io, https://gofiber.net",
+		AllowHeaders: "Origin, Content-Type, Accept",
+	}))
+
+	server.healthchecker.HTTPHandler()
+
+	app.Get("/health", WrapHandler(server.healthchecker.HTTPHandler()))
+	app.Post("/api/v1/inverters", server.envoyReceive)
 
 	log.Printf("Starting HTTP listener on %s", *listenAddress)
-	log.Fatal(srv.ListenAndServe())
+	log.Fatal(app.Listen(*listenAddress))
 }
