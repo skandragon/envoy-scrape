@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
 	flogger "github.com/gofiber/fiber/v2/middleware/logger"
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 	"github.com/skandragon/gohealthcheck/health"
@@ -139,11 +138,6 @@ func main() {
 	})
 
 	app.Use(flogger.New())
-
-	app.Use(cors.New(cors.Config{
-		AllowOrigins: "https://gofiber.io, https://gofiber.net",
-		AllowHeaders: "Origin, Content-Type, Accept",
-	}))
 
 	server.healthchecker.HTTPHandler()
 
