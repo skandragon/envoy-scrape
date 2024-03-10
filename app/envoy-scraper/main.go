@@ -18,9 +18,12 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -40,7 +43,10 @@ type submission struct {
 	Inverters   []inverterReport `json:"inverters,omitempty"`
 }
 
-var knownInverters = map[string]inverterReport{}
+var (
+	knownInverters = map[string]inverterReport{}
+	envoyClient    *http.Client
+)
 
 func updateInverters(i inverterReport) bool {
 	old, found := knownInverters[i.SerialNumber]
@@ -87,7 +93,10 @@ func sendUpdate(url string, secret string, serial string, i []inverterReport) {
 }
 
 func main() {
-	username := flag.String("username", "installer", "username to connect to the Envoy")
+	ctx := context.Background()
+
+	envoyClient = makeClient()
+
 	serial := flag.String("serial", "", "serial number of the Envoy")
 	host := flag.String("host", "", "the hostname or IP address of the Envoy")
 	url := flag.String("url", "", "the URL to post data to")
@@ -113,9 +122,12 @@ func main() {
 		os.Exit(-1)
 	}
 
-	password := makePasswordForSerial(*serial, *username)
+	token, set := os.LookupEnv("ENVOY_TOKEN")
+	if !set {
+		log.Fatalf("ENVOY_TOKEN is not set")
+	}
 
-	envoyURL := fmt.Sprintf("http://%s", *host)
+	envoyURL := fmt.Sprintf("https://%s", *host)
 
 	first := true
 	for {
@@ -123,9 +135,9 @@ func main() {
 			time.Sleep(time.Minute)
 		}
 
-		_, body, err := digestGet(*username, password, envoyURL+"/api/v1/production/inverters")
+		body, err := makeRequest(ctx, token, envoyURL+"/api/v1/production/inverters")
 		if err != nil {
-			log.Printf("Fetching error: %v", err)
+			log.Printf("%v", err)
 			first = false
 			continue
 		}
@@ -154,4 +166,31 @@ func main() {
 		first = false
 		log.Printf("fetch complete.  %d inverters, %d updates", len(inverters), len(updatedInverters))
 	}
+}
+
+func makeClient() *http.Client {
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	return &http.Client{Transport: tr}
+}
+
+func makeRequest(ctx context.Context, token string, address string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := envoyClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	content, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return content, nil
 }
