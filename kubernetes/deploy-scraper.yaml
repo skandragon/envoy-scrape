@@ -24,6 +24,8 @@ spec:
             value: "10.44.100.1"
           - name: ENVOY_SERIAL
             value: "123456789012"
+          - name: ENVOY_TOKEN
+            value: "..." # should likely be in a secret
           - name: ENVOY_RECEIVER_SECRET
             value: "12345"
           - name: ENVOY_RECEIVER_URL
