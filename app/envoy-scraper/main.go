@@ -86,8 +86,20 @@ func main() {
 	if found {
 		*influxURL = u
 	}
+	if *influxToken == "" {
+		log.Printf("ENVOY_INFLUX_TOKEN is not set, and not on command line")
+		flag.Usage()
+		os.Exit(-1)
+	}
 
-	if *serial == "" || *host == "" || *influxToken == "" {
+	if *host == "" {
+		log.Printf("host is not set")
+		flag.Usage()
+		os.Exit(-1)
+	}
+
+	if *serial == "" {
+		log.Printf("serial number is not set")
 		flag.Usage()
 		os.Exit(-1)
 	}
