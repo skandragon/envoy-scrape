@@ -24,12 +24,12 @@ IMAGE_PREFIX=docker.flame.org/library/
 #
 
 # These are targets for "make local"
-BINARIES = envoy-receiver envoy-scraper
+BINARIES = envoy-scraper
 
 # These are the targets for Docker images, used both for the multi-arch and
 # single (local) Docker builds.
 # Dockerfiles should have a target that ends in -image, e.g. stormdriver-image.
-IMAGE_TARGETS = envoy-receiver envoy-scraper
+IMAGE_TARGETS = envoy-scraper
 #
 # Below here lies magic...
 #

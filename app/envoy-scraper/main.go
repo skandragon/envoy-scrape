@@ -17,7 +17,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -28,6 +27,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 )
 
 type inverterReport struct {
@@ -38,14 +39,15 @@ type inverterReport struct {
 	MaxReportWatts  int    `json:"maxReportWatts,omitempty"`
 }
 
-type submission struct {
-	EnvoySerial string           `json:"envoySerial,omitempty"`
-	Inverters   []inverterReport `json:"inverters,omitempty"`
-}
-
 var (
+	serial      = flag.String("serial", "", "serial number of the Envoy")
+	host        = flag.String("host", "", "the hostname or IP address of the Envoy")
+	influxToken = flag.String("influxToken", "", "the token for InfluxDB")
+	influxURL   = flag.String("influxURL", "http://10.45.220.3:8086", "the URL for InfluxDB")
+
 	knownInverters = map[string]inverterReport{}
 	envoyClient    *http.Client
+	db             influxdb2.Client
 )
 
 func updateInverters(i inverterReport) bool {
@@ -61,46 +63,10 @@ func updateInverters(i inverterReport) bool {
 	return true
 }
 
-func sendUpdate(url string, secret string, serial string, i []inverterReport) {
-	sub := submission{serial, i}
-	data, err := json.Marshal(sub)
-	if err != nil {
-		log.Printf("%v", err)
-		return
-	}
-
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
-	if err != nil {
-		log.Printf("%v", err)
-		return
-	}
-	req.Header.Add("content-type", "application/json")
-	req.Header.Add("x-flameorg-auth", secret)
-
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("%v", err)
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("Got status %d while sending inverter update", resp.StatusCode)
-	}
-}
-
 func main() {
 	ctx := context.Background()
 
 	envoyClient = makeClient()
-
-	serial := flag.String("serial", "", "serial number of the Envoy")
-	host := flag.String("host", "", "the hostname or IP address of the Envoy")
-	url := flag.String("url", "", "the URL to post data to")
-	secret := flag.String("secret", "", "the secret used to post to the receiver")
 
 	flag.Parse()
 
@@ -110,14 +76,18 @@ func main() {
 	if *host == "" {
 		*host = os.Getenv("ENVOY_HOST")
 	}
-	if *url == "" {
-		*url = os.Getenv("ENVOY_RECEIVER_URL")
-	}
-	if *secret == "" {
-		*secret = os.Getenv("ENVOY_RECEIVER_SECRET")
+
+	x, found := os.LookupEnv("ENVOY_INFLUX_TOKEN")
+	if found {
+		*influxToken = x
 	}
 
-	if *serial == "" || *host == "" || *url == "" || *secret == "" {
+	u, found := os.LookupEnv("ENVOY_INFLUX_URL")
+	if found {
+		*influxURL = u
+	}
+
+	if *serial == "" || *host == "" || *influxToken == "" {
 		flag.Usage()
 		os.Exit(-1)
 	}
@@ -126,6 +96,9 @@ func main() {
 	if !set {
 		log.Fatalf("ENVOY_TOKEN is not set")
 	}
+
+	dbopt := influxdb2.DefaultOptions().SetBatchSize(20)
+	db = influxdb2.NewClientWithOptions(*influxURL, *influxToken, dbopt)
 
 	envoyURL := fmt.Sprintf("https://%s", *host)
 
@@ -160,7 +133,7 @@ func main() {
 		}
 
 		if len(updatedInverters) > 0 {
-			sendUpdate(*url, *secret, *serial, updatedInverters)
+			process(*serial, updatedInverters)
 		}
 
 		first = false
@@ -193,4 +166,31 @@ func makeRequest(ctx context.Context, token string, address string) ([]byte, err
 		return nil, err
 	}
 	return content, nil
+}
+
+func process(serial string, items []inverterReport) {
+	writeAPI := db.WriteAPI("flame", "envoy")
+	errorsCh := writeAPI.Errors()
+	go func() {
+		for err := range errorsCh {
+			log.Printf("influx write error: %v", err)
+		}
+	}()
+
+	for _, i := range items {
+		tags := map[string]string{
+			"envoySerial": serial,
+			"serial":      i.SerialNumber,
+			"type":        fmt.Sprintf("%d", i.DevType),
+		}
+		fields := map[string]interface{}{
+			"power":    i.LastReportWatts,
+			"maxPower": i.MaxReportWatts,
+		}
+		ts := time.Unix(int64(i.LastReportDate), 0)
+		p := influxdb2.NewPoint("inverterPower", tags, fields, ts)
+		writeAPI.WritePoint(p)
+	}
+
+	writeAPI.Flush()
 }
