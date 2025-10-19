@@ -1,4 +1,5 @@
 # envoy-scrape
+
 Scrape data locally from a an Envoy solar controller
 
 ## Architecture
@@ -41,5 +42,5 @@ analysis would be possible based on detailed data per inverter over time.
 
 ## Receiver
 
-The receiver accepts data from one or more scrapers, and stores the data in 
+The receiver accepts data from one or more scrapers, and stores the data in
 an InfluxDB database for Grafana to consume.
