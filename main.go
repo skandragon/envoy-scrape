@@ -48,6 +48,7 @@ type inverterReport struct {
 var (
 	serial = flag.String("serial", "", "serial number of the Envoy")
 	host   = flag.String("host", "", "the hostname or IP address of the Envoy")
+	siteID = flag.String("site", "", "site ID grouping one or more Envoys")
 
 	envoyClient = &http.Client{
 		Timeout:   30 * time.Second,
@@ -64,8 +65,11 @@ func main() {
 	if *host == "" {
 		*host = os.Getenv("ENVOY_HOST")
 	}
-	if *host == "" || *serial == "" {
-		log.Printf("host and serial must be set")
+	if *siteID == "" {
+		*siteID = os.Getenv("ENVOY_SITE_ID")
+	}
+	if *host == "" || *serial == "" || *siteID == "" {
+		log.Printf("host, serial, and site must be set")
 		flag.Usage()
 		os.Exit(-1)
 	}
@@ -116,6 +120,7 @@ func main() {
 		}
 		for _, i := range inverters {
 			attrs := metric.WithAttributes(
+				attribute.String("site.id", *siteID),
 				attribute.String("inverter.serial", i.SerialNumber),
 				attribute.String("inverter.type", strconv.Itoa(i.DevType)),
 			)

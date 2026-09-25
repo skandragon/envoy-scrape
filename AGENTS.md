@@ -35,6 +35,7 @@ Required environment variables:
 - `ENVOY_TOKEN` - Bearer token for Envoy API authentication
 - `ENVOY_HOST` - Hostname or IP of the Envoy device
 - `ENVOY_SERIAL` - Serial number of the Envoy device
+- `ENVOY_SITE_ID` - Site ID shared by all Envoys at one site (exported as `site.id`)
 - `OTEL_EXPORTER_OTLP_ENDPOINT` - OTLP/gRPC endpoint (defaults to localhost:4317); other standard `OTEL_*` vars apply
 
 ```bash
@@ -57,5 +58,5 @@ The live deployment is in `../kubernetes-clusters/clusters/kubepi/envoy-scraper`
 
 ## Key Technical Details
 
-- Metrics: `solar.envoy.inverter.power`, `solar.envoy.inverter.power.max` (W), `solar.envoy.inverter.last_report` (unix s); attributes `inverter.serial`, `inverter.type`
+- Metrics: `solar.envoy.inverter.power`, `solar.envoy.inverter.power.max` (W), `solar.envoy.inverter.last_report` (unix s); attributes `site.id`, `inverter.serial`, `inverter.type`
 - TLS certificate verification is disabled for Envoy API calls
