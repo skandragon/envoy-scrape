@@ -13,6 +13,24 @@ Once a minute the scraper fetches `/api/v1/production/inverters` and records:
 
 Attributes: `site.id`, `inverter.serial`, `inverter.type`.
 
+Every 15 seconds it also reads `/ivp/meters/readings` and, for each enabled CT
+meter, records whole-meter totals:
+
+| Metric | Unit |
+|---|---|
+| `solar.envoy.meter.power` | W |
+| `solar.envoy.meter.power.apparent` | VA |
+| `solar.envoy.meter.power.reactive` | var |
+| `solar.envoy.meter.power_factor` | 1 |
+| `solar.envoy.meter.voltage` | V |
+| `solar.envoy.meter.current` | A |
+| `solar.envoy.meter.frequency` | Hz |
+| `solar.envoy.meter.energy.delivered` | Wh (lifetime) |
+| `solar.envoy.meter.energy.received` | Wh (lifetime) |
+
+Attributes: `site.id`, `meter.type` (`production`, `net-consumption`, ...).
+Metrics are exported every 15 seconds.
+
 ## Configuration
 
 - `ENVOY_HOST` - hostname or IP of the Envoy
