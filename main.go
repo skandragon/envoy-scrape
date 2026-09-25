@@ -45,6 +45,29 @@ type inverterReport struct {
 	MaxReportWatts  int    `json:"maxReportWatts,omitempty"`
 }
 
+// meterInterval is both the meter poll rate and the OTLP export interval.
+const meterInterval = 15 * time.Second
+
+type meterInfo struct {
+	EID             int64  `json:"eid"`
+	State           string `json:"state"`
+	MeasurementType string `json:"measurementType"`
+}
+
+// meterReading is the whole-meter total; per-phase "channels" are ignored.
+type meterReading struct {
+	EID           int64   `json:"eid"`
+	ActivePower   float64 `json:"activePower"`
+	ApparentPower float64 `json:"apparentPower"`
+	ReactivePower float64 `json:"reactivePower"`
+	PwrFactor     float64 `json:"pwrFactor"`
+	Voltage       float64 `json:"voltage"`
+	Current       float64 `json:"current"`
+	Freq          float64 `json:"freq"`
+	ActEnergyDlvd float64 `json:"actEnergyDlvd"`
+	ActEnergyRcvd float64 `json:"actEnergyRcvd"`
+}
+
 var (
 	serial = flag.String("serial", "", "serial number of the Envoy")
 	host   = flag.String("host", "", "the hostname or IP address of the Envoy")
@@ -86,7 +109,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("otlp exporter: %v", err)
 	}
-	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter)))
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(
+		sdkmetric.NewPeriodicReader(exporter, sdkmetric.WithInterval(meterInterval))))
 	defer func() {
 		if err := provider.Shutdown(context.Background()); err != nil {
 			log.Printf("meter provider shutdown: %v", err)
@@ -94,29 +118,47 @@ func main() {
 	}()
 
 	meter := provider.Meter("github.com/skandragon/envoy-scrape")
-	power, err := meter.Int64Gauge("solar.envoy.inverter.power", metric.WithUnit("W"),
-		metric.WithDescription("Most recent power reported by the inverter"))
-	if err != nil {
-		log.Fatal(err)
+	intGauge := func(name, unit, desc string) metric.Int64Gauge {
+		g, err := meter.Int64Gauge(name, metric.WithUnit(unit), metric.WithDescription(desc))
+		if err != nil {
+			log.Fatal(err)
+		}
+		return g
 	}
-	maxPower, err := meter.Int64Gauge("solar.envoy.inverter.power.max", metric.WithUnit("W"),
-		metric.WithDescription("Maximum power reported by the inverter"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	lastReport, err := meter.Int64Gauge("solar.envoy.inverter.last_report", metric.WithUnit("s"),
-		metric.WithDescription("Unix time of the inverter's last report"))
-	if err != nil {
-		log.Fatal(err)
+	floatGauge := func(name, unit, desc string) metric.Float64Gauge {
+		g, err := meter.Float64Gauge(name, metric.WithUnit(unit), metric.WithDescription(desc))
+		if err != nil {
+			log.Fatal(err)
+		}
+		return g
 	}
 
-	url := fmt.Sprintf("https://%s/api/v1/production/inverters", *host)
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-	for {
-		inverters, err := fetch(ctx, token, url)
-		if err != nil {
+	power := intGauge("solar.envoy.inverter.power", "W", "Most recent power reported by the inverter")
+	maxPower := intGauge("solar.envoy.inverter.power.max", "W", "Maximum power reported by the inverter")
+	lastReport := intGauge("solar.envoy.inverter.last_report", "s", "Unix time of the inverter's last report")
+
+	meterGauges := []struct {
+		g     metric.Float64Gauge
+		value func(meterReading) float64
+	}{
+		{floatGauge("solar.envoy.meter.power", "W", "Active power"), func(r meterReading) float64 { return r.ActivePower }},
+		{floatGauge("solar.envoy.meter.power.apparent", "VA", "Apparent power"), func(r meterReading) float64 { return r.ApparentPower }},
+		{floatGauge("solar.envoy.meter.power.reactive", "var", "Reactive power"), func(r meterReading) float64 { return r.ReactivePower }},
+		{floatGauge("solar.envoy.meter.power_factor", "1", "Power factor"), func(r meterReading) float64 { return r.PwrFactor }},
+		{floatGauge("solar.envoy.meter.voltage", "V", "RMS voltage"), func(r meterReading) float64 { return r.Voltage }},
+		{floatGauge("solar.envoy.meter.current", "A", "RMS current"), func(r meterReading) float64 { return r.Current }},
+		{floatGauge("solar.envoy.meter.frequency", "Hz", "Line frequency"), func(r meterReading) float64 { return r.Freq }},
+		{floatGauge("solar.envoy.meter.energy.delivered", "Wh", "Lifetime energy delivered"), func(r meterReading) float64 { return r.ActEnergyDlvd }},
+		{floatGauge("solar.envoy.meter.energy.received", "Wh", "Lifetime energy received"), func(r meterReading) float64 { return r.ActEnergyRcvd }},
+	}
+
+	base := fmt.Sprintf("https://%s", *host)
+
+	pollInverters := func() {
+		var inverters []inverterReport
+		if err := fetch(ctx, token, base+"/api/v1/production/inverters", &inverters); err != nil {
 			log.Printf("%v", err)
+			return
 		}
 		for _, i := range inverters {
 			attrs := metric.WithAttributes(
@@ -129,39 +171,80 @@ func main() {
 			lastReport.Record(ctx, int64(i.LastReportDate), attrs)
 		}
 		log.Printf("fetch complete. %d inverters", len(inverters))
+	}
 
+	pollMeters := func() {
+		var meters []meterInfo
+		if err := fetch(ctx, token, base+"/ivp/meters", &meters); err != nil {
+			log.Printf("%v", err)
+			return
+		}
+		var readings []meterReading
+		if err := fetch(ctx, token, base+"/ivp/meters/readings", &readings); err != nil {
+			log.Printf("%v", err)
+			return
+		}
+		enabled := map[int64]string{}
+		for _, m := range meters {
+			if m.State == "enabled" {
+				enabled[m.EID] = m.MeasurementType
+			}
+		}
+		for _, r := range readings {
+			mtype, ok := enabled[r.EID]
+			if !ok {
+				continue
+			}
+			attrs := metric.WithAttributes(
+				attribute.String("site.id", *siteID),
+				attribute.String("meter.type", mtype),
+			)
+			for _, mg := range meterGauges {
+				mg.g.Record(ctx, mg.value(r), attrs)
+			}
+		}
+	}
+
+	inverterTicker := time.NewTicker(time.Minute)
+	defer inverterTicker.Stop()
+	meterTicker := time.NewTicker(meterInterval)
+	defer meterTicker.Stop()
+	pollInverters()
+	pollMeters()
+	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-inverterTicker.C:
+			pollInverters()
+		case <-meterTicker.C:
+			pollMeters()
 		}
 	}
 }
 
-func fetch(ctx context.Context, token string, url string) ([]inverterReport, error) {
+func fetch(ctx context.Context, token string, url string, v any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := envoyClient.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s: %s", url, resp.Status, body)
+		return fmt.Errorf("%s: %s: %s", url, resp.Status, body)
 	}
-
-	var inverters []inverterReport
-	if err := json.Unmarshal(body, &inverters); err != nil {
-		return nil, fmt.Errorf("%s: %w", url, err)
+	if err := json.Unmarshal(body, v); err != nil {
+		return fmt.Errorf("%s: %w", url, err)
 	}
-	return inverters, nil
+	return nil
 }

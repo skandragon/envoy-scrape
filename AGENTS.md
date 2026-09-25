@@ -9,9 +9,9 @@ This is a Go-based monitoring system for Enphase Envoy solar controllers that sc
 ## Architecture
 
 - **Single binary**: All code is in `main.go` (no package structure)
-- **Data flow**: Envoy API → HTTP client (with TLS InsecureSkipVerify) → OTel Int64Gauges → OTLP/gRPC (periodic reader, 60s)
+- **Data flow**: Envoy API → HTTP client (with TLS InsecureSkipVerify) → OTel Int64Gauges → OTLP/gRPC (periodic reader, 15s)
 - **Authentication**: Uses bearer token authentication via `ENVOY_TOKEN` environment variable
-- **Polling**: Fetches from `/api/v1/production/inverters` endpoint every 60 seconds
+- **Polling**: `/api/v1/production/inverters` every 60s; `/ivp/meters` + `/ivp/meters/readings` every 15s (enabled meters only, whole-meter totals)
 
 ## Build Commands
 
@@ -59,4 +59,5 @@ The live deployment is in `../kubernetes-clusters/clusters/kubepi/envoy-scraper`
 ## Key Technical Details
 
 - Metrics: `solar.envoy.inverter.power`, `solar.envoy.inverter.power.max` (W), `solar.envoy.inverter.last_report` (unix s); attributes `site.id`, `inverter.serial`, `inverter.type`
+- Meter metrics: `solar.envoy.meter.*` (power, power.apparent, power.reactive, power_factor, voltage, current, frequency, energy.delivered, energy.received); attributes `site.id`, `meter.type`
 - TLS certificate verification is disabled for Envoy API calls
