@@ -11,7 +11,7 @@ Once a minute the scraper fetches `/api/v1/production/inverters` and records:
 | `envoy.inverter.power.max` | W | max reported power |
 | `envoy.inverter.last_report` | s | unix time of the inverter's last report |
 
-Attributes: `envoy.serial`, `inverter.serial`, `inverter.type`.
+Attributes: `inverter.serial`, `inverter.type`.
 
 ## Configuration
 

@@ -116,7 +116,6 @@ func main() {
 		}
 		for _, i := range inverters {
 			attrs := metric.WithAttributes(
-				attribute.String("envoy.serial", *serial),
 				attribute.String("inverter.serial", i.SerialNumber),
 				attribute.String("inverter.type", strconv.Itoa(i.DevType)),
 			)

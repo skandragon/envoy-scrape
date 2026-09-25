@@ -57,5 +57,5 @@ The live deployment is in `../kubernetes-clusters/clusters/kubepi/envoy-scraper`
 
 ## Key Technical Details
 
-- Metrics: `envoy.inverter.power`, `envoy.inverter.power.max` (W), `envoy.inverter.last_report` (unix s); attributes `envoy.serial`, `inverter.serial`, `inverter.type`
+- Metrics: `envoy.inverter.power`, `envoy.inverter.power.max` (W), `envoy.inverter.last_report` (unix s); attributes `inverter.serial`, `inverter.type`
 - TLS certificate verification is disabled for Envoy API calls
