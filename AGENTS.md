@@ -11,7 +11,7 @@ This is a Go-based monitoring system for Enphase Envoy solar controllers that sc
 - **Single binary**: All code is in `main.go` (no package structure)
 - **Data flow**: Envoy API → HTTP client (with TLS InsecureSkipVerify) → OTel Int64Gauges → OTLP/gRPC (periodic reader, 15s)
 - **Authentication**: Uses bearer token authentication via `ENVOY_TOKEN` environment variable
-- **Polling**: `/api/v1/production/inverters` every 60s; `/ivp/meters` + `/ivp/meters/readings` every 15s (enabled meters only, whole-meter totals)
+- **Polling**: `/api/v1/production/inverters` every 60s; `/ivp/meters` + `/ivp/meters/readings` every 15s (enabled meters only, whole-meter totals); Enlighten array layout daily (optional)
 
 ## Build Commands
 
@@ -36,6 +36,7 @@ Required environment variables:
 - `ENVOY_HOST` - Hostname or IP of the Envoy device
 - `ENVOY_SERIAL` - Serial number of the Envoy device
 - `ENVOY_SITE_ID` - Site ID shared by all Envoys at one site (exported as `site.id`)
+- `ENLIGHTEN_EMAIL`, `ENLIGHTEN_PASSWORD` - Optional Enlighten cloud login; enables the daily array layout fetch
 - `OTEL_EXPORTER_OTLP_ENDPOINT` - OTLP/gRPC endpoint (defaults to localhost:4317); other standard `OTEL_*` vars apply
 
 ```bash
@@ -58,6 +59,7 @@ The live deployment is in `../kubernetes-clusters/clusters/kubepi/envoy-scraper`
 
 ## Key Technical Details
 
-- Metrics: `solar.envoy.inverter.power`, `solar.envoy.inverter.power.max` (W), `solar.envoy.inverter.last_report` (unix s); attributes `site.id`, `inverter.serial`, `inverter.type`
+- Metrics: `solar.envoy.inverter.power`, `solar.envoy.inverter.power.max` (W), `solar.envoy.inverter.last_report` (unix s); attributes `site.id`, `inverter.serial`, `inverter.type`, `array.name` (when the layout is known)
 - Meter metrics: `solar.envoy.meter.*` (power, power.apparent, power.reactive, power_factor, voltage, current, frequency, energy.delivered, energy.received); attributes `site.id`, `meter.type`
+- Array layout: Enlighten's undocumented `/pv/systems/<id>/array_layout_x.json` (system ID comes from the login response), exported daily as an OTLP log record with event name `solar.envoy.layout`, the raw JSON as its body, and a `site.id` attribute. `-layout` prints it and exits.
 - TLS certificate verification is disabled for Envoy API calls

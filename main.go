@@ -25,15 +25,21 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	otellog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/metric"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
 
@@ -68,7 +74,24 @@ type meterReading struct {
 	ActEnergyRcvd float64 `json:"actEnergyRcvd"`
 }
 
+// layout is the subset of Enlighten's array layout we use; the full JSON is
+// exported as a log record for dashboards.
+type layout struct {
+	Arrays []struct {
+		Label   string `json:"label"`
+		Modules []struct {
+			Inverter struct {
+				SerialNum string `json:"serial_num"`
+			} `json:"inverter"`
+		} `json:"modules"`
+	} `json:"arrays"`
+}
+
+const enlighten = "https://enlighten.enphaseenergy.com"
+
 var (
+	printLayout = flag.Bool("layout", false, "print the Enlighten array layout JSON and exit")
+
 	serial = flag.String("serial", "", "serial number of the Envoy")
 	host   = flag.String("host", "", "the hostname or IP address of the Envoy")
 	siteID = flag.String("site", "", "site ID grouping one or more Envoys")
@@ -81,6 +104,16 @@ var (
 
 func main() {
 	flag.Parse()
+
+	email, password := os.Getenv("ENLIGHTEN_EMAIL"), os.Getenv("ENLIGHTEN_PASSWORD")
+	if *printLayout {
+		body, err := fetchLayout(context.Background(), email, password)
+		if err != nil {
+			log.Fatal(err)
+		}
+		os.Stdout.Write(body)
+		return
+	}
 
 	if *serial == "" {
 		*serial = os.Getenv("ENVOY_SERIAL")
@@ -116,6 +149,18 @@ func main() {
 			log.Printf("meter provider shutdown: %v", err)
 		}
 	}()
+
+	logExporter, err := otlploggrpc.New(ctx)
+	if err != nil {
+		log.Fatalf("otlp log exporter: %v", err)
+	}
+	logProvider := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)))
+	defer func() {
+		if err := logProvider.Shutdown(context.Background()); err != nil {
+			log.Printf("logger provider shutdown: %v", err)
+		}
+	}()
+	logger := logProvider.Logger("github.com/skandragon/envoy-scrape")
 
 	meter := provider.Meter("github.com/skandragon/envoy-scrape")
 	intGauge := func(name, unit, desc string) metric.Int64Gauge {
@@ -154,6 +199,30 @@ func main() {
 
 	base := fmt.Sprintf("https://%s", *host)
 
+	// inverter serial -> array label, refreshed daily from Enlighten.
+	arrayOf := map[string]string{}
+	pollLayout := func() {
+		body, err := fetchLayout(ctx, email, password)
+		if err != nil {
+			log.Printf("layout: %v", err)
+			return
+		}
+		m, err := arrayBySerial(body)
+		if err != nil {
+			log.Printf("layout: %v", err)
+			return
+		}
+		arrayOf = m
+		var rec otellog.Record
+		rec.SetTimestamp(time.Now())
+		rec.SetEventName("solar.envoy.layout")
+		rec.SetSeverity(otellog.SeverityInfo)
+		rec.SetBody(attribute.StringValue(string(body)))
+		rec.AddAttributes(attribute.String("site.id", *siteID))
+		logger.Emit(ctx, rec)
+		log.Printf("layout fetched. %d inverters", len(m))
+	}
+
 	pollInverters := func() {
 		var inverters []inverterReport
 		if err := fetch(ctx, token, base+"/api/v1/production/inverters", &inverters); err != nil {
@@ -161,11 +230,15 @@ func main() {
 			return
 		}
 		for _, i := range inverters {
-			attrs := metric.WithAttributes(
+			kv := []attribute.KeyValue{
 				attribute.String("site.id", *siteID),
 				attribute.String("inverter.serial", i.SerialNumber),
 				attribute.String("inverter.type", strconv.Itoa(i.DevType)),
-			)
+			}
+			if a, ok := arrayOf[i.SerialNumber]; ok {
+				kv = append(kv, attribute.String("array.name", a))
+			}
+			attrs := metric.WithAttributes(kv...)
 			power.Record(ctx, int64(i.LastReportWatts), attrs)
 			maxPower.Record(ctx, int64(i.MaxReportWatts), attrs)
 			lastReport.Record(ctx, int64(i.LastReportDate), attrs)
@@ -209,12 +282,21 @@ func main() {
 	defer inverterTicker.Stop()
 	meterTicker := time.NewTicker(meterInterval)
 	defer meterTicker.Stop()
+	layoutTicker := time.NewTicker(24 * time.Hour)
+	defer layoutTicker.Stop()
+	if email == "" {
+		layoutTicker.Stop()
+	} else {
+		pollLayout()
+	}
 	pollInverters()
 	pollMeters()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-layoutTicker.C:
+			pollLayout()
 		case <-inverterTicker.C:
 			pollInverters()
 		case <-meterTicker.C:
@@ -247,4 +329,67 @@ func fetch(ctx context.Context, token string, url string, v any) error {
 		return fmt.Errorf("%s: %w", url, err)
 	}
 	return nil
+}
+
+// fetchLayout logs into Enlighten and returns the raw array layout JSON for
+// the account's system. These are Enlighten's undocumented web endpoints.
+func fetchLayout(ctx context.Context, email, password string) ([]byte, error) {
+	if email == "" || password == "" {
+		return nil, fmt.Errorf("ENLIGHTEN_EMAIL and ENLIGHTEN_PASSWORD must be set")
+	}
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar, Timeout: 30 * time.Second}
+
+	get := func(req *http.Request) ([]byte, error) {
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("%s: %s", req.URL.Path, resp.Status)
+		}
+		return body, nil
+	}
+
+	form := url.Values{"user[email]": {email}, "user[password]": {password}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, enlighten+"/login/login.json", strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	body, err := get(req)
+	if err != nil {
+		return nil, err
+	}
+	var login struct {
+		SystemID int64 `json:"system_id"`
+	}
+	if err := json.Unmarshal(body, &login); err != nil || login.SystemID == 0 {
+		return nil, fmt.Errorf("login: no system_id in response")
+	}
+
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/pv/systems/%d/array_layout_x.json", enlighten, login.SystemID), nil)
+	if err != nil {
+		return nil, err
+	}
+	return get(req)
+}
+
+func arrayBySerial(body []byte) (map[string]string, error) {
+	var l layout
+	if err := json.Unmarshal(body, &l); err != nil {
+		return nil, err
+	}
+	m := map[string]string{}
+	for _, a := range l.Arrays {
+		for _, mod := range a.Modules {
+			m[mod.Inverter.SerialNum] = a.Label
+		}
+	}
+	return m, nil
 }

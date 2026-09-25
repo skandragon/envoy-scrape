@@ -4,8 +4,11 @@ go 1.27
 
 require (
 	go.opentelemetry.io/otel v1.46.0
+	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.22.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.46.0
+	go.opentelemetry.io/otel/log v0.22.0
 	go.opentelemetry.io/otel/metric v1.46.0
+	go.opentelemetry.io/otel/sdk/log v0.22.0
 	go.opentelemetry.io/otel/sdk/metric v1.46.0
 )
 
