@@ -7,9 +7,9 @@ Once a minute the scraper fetches `/api/v1/production/inverters` and records:
 
 | Metric | Unit | Meaning |
 |---|---|---|
-| `envoy.inverter.power` | W | last reported power |
-| `envoy.inverter.power.max` | W | max reported power |
-| `envoy.inverter.last_report` | s | unix time of the inverter's last report |
+| `solar.envoy.inverter.power` | W | last reported power |
+| `solar.envoy.inverter.power.max` | W | max reported power |
+| `solar.envoy.inverter.last_report` | s | unix time of the inverter's last report |
 
 Attributes: `inverter.serial`, `inverter.type`.
 
