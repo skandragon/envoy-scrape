@@ -90,17 +90,17 @@ func main() {
 	}()
 
 	meter := provider.Meter("github.com/skandragon/envoy-scrape")
-	power, err := meter.Int64Gauge("envoy.inverter.power", metric.WithUnit("W"),
+	power, err := meter.Int64Gauge("solar.envoy.inverter.power", metric.WithUnit("W"),
 		metric.WithDescription("Most recent power reported by the inverter"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	maxPower, err := meter.Int64Gauge("envoy.inverter.power.max", metric.WithUnit("W"),
+	maxPower, err := meter.Int64Gauge("solar.envoy.inverter.power.max", metric.WithUnit("W"),
 		metric.WithDescription("Maximum power reported by the inverter"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	lastReport, err := meter.Int64Gauge("envoy.inverter.last_report", metric.WithUnit("s"),
+	lastReport, err := meter.Int64Gauge("solar.envoy.inverter.last_report", metric.WithUnit("s"),
 		metric.WithDescription("Unix time of the inverter's last report"))
 	if err != nil {
 		log.Fatal(err)
