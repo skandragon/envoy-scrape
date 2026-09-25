@@ -26,14 +26,12 @@ spec:
             value: "123456789012"
           - name: ENVOY_TOKEN
             value: "..." # should likely be in a secret
-          - name: ENVOY_RECEIVER_SECRET
-            value: "12345"
-          - name: ENVOY_RECEIVER_URL
-            value: "https://iot.flame.org/envoy/api/v1/inverters"
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: http://collector-agent.cardinalhq.svc.cluster.local:4317
         resources:
           requests:
             cpu: "100m"
-            memory: "16M"
+            memory: "32Mi"
           limits:
             cpu: "500m"
-            memory: "32M"
+            memory: "64Mi"

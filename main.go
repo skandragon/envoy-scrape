@@ -26,9 +26,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"strconv"
+	"syscall"
 	"time"
 
-	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
 
 type inverterReport struct {
@@ -40,34 +46,16 @@ type inverterReport struct {
 }
 
 var (
-	serial      = flag.String("serial", "", "serial number of the Envoy")
-	host        = flag.String("host", "", "the hostname or IP address of the Envoy")
-	influxToken = flag.String("influxToken", "", "the token for InfluxDB")
-	influxURL   = flag.String("influxURL", "http://10.45.220.3:8086", "the URL for InfluxDB")
+	serial = flag.String("serial", "", "serial number of the Envoy")
+	host   = flag.String("host", "", "the hostname or IP address of the Envoy")
 
-	knownInverters = map[string]inverterReport{}
-	envoyClient    *http.Client
-	db             influxdb2.Client
+	envoyClient = &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+	}
 )
 
-func updateInverters(i inverterReport) bool {
-	old, found := knownInverters[i.SerialNumber]
-	if !found {
-		knownInverters[i.SerialNumber] = i
-		return true
-	}
-	if old.LastReportDate == i.LastReportDate {
-		return false
-	}
-	knownInverters[i.SerialNumber] = i
-	return true
-}
-
 func main() {
-	ctx := context.Background()
-
-	envoyClient = makeClient()
-
 	flag.Parse()
 
 	if *serial == "" {
@@ -76,92 +64,77 @@ func main() {
 	if *host == "" {
 		*host = os.Getenv("ENVOY_HOST")
 	}
-
-	x, found := os.LookupEnv("ENVOY_INFLUX_TOKEN")
-	if found {
-		*influxToken = x
-	}
-
-	u, found := os.LookupEnv("ENVOY_INFLUX_URL")
-	if found {
-		*influxURL = u
-	}
-	if *influxToken == "" {
-		log.Printf("ENVOY_INFLUX_TOKEN is not set, and not on command line")
+	if *host == "" || *serial == "" {
+		log.Printf("host and serial must be set")
 		flag.Usage()
 		os.Exit(-1)
 	}
-
-	if *host == "" {
-		log.Printf("host is not set")
-		flag.Usage()
-		os.Exit(-1)
-	}
-
-	if *serial == "" {
-		log.Printf("serial number is not set")
-		flag.Usage()
-		os.Exit(-1)
-	}
-
 	token, set := os.LookupEnv("ENVOY_TOKEN")
 	if !set {
 		log.Fatalf("ENVOY_TOKEN is not set")
 	}
 
-	dbopt := influxdb2.DefaultOptions().SetBatchSize(20)
-	db = influxdb2.NewClientWithOptions(*influxURL, *influxToken, dbopt)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-	envoyURL := fmt.Sprintf("https://%s", *host)
+	// Endpoint, service name, etc. come from the standard OTEL_* env vars.
+	exporter, err := otlpmetricgrpc.New(ctx)
+	if err != nil {
+		log.Fatalf("otlp exporter: %v", err)
+	}
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter)))
+	defer func() {
+		if err := provider.Shutdown(context.Background()); err != nil {
+			log.Printf("meter provider shutdown: %v", err)
+		}
+	}()
 
-	first := true
+	meter := provider.Meter("github.com/skandragon/envoy-scrape")
+	power, err := meter.Int64Gauge("envoy.inverter.power", metric.WithUnit("W"),
+		metric.WithDescription("Most recent power reported by the inverter"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	maxPower, err := meter.Int64Gauge("envoy.inverter.power.max", metric.WithUnit("W"),
+		metric.WithDescription("Maximum power reported by the inverter"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	lastReport, err := meter.Int64Gauge("envoy.inverter.last_report", metric.WithUnit("s"),
+		metric.WithDescription("Unix time of the inverter's last report"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	url := fmt.Sprintf("https://%s/api/v1/production/inverters", *host)
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
 	for {
-		if !first {
-			time.Sleep(time.Minute)
-		}
-
-		body, err := makeRequest(ctx, token, envoyURL+"/api/v1/production/inverters")
+		inverters, err := fetch(ctx, token, url)
 		if err != nil {
 			log.Printf("%v", err)
-			first = false
-			continue
 		}
-
-		inverters := []inverterReport{}
-		err = json.Unmarshal(body, &inverters)
-		if err != nil {
-			log.Printf("%v", err)
-			first = false
-			continue
+		for _, i := range inverters {
+			attrs := metric.WithAttributes(
+				attribute.String("inverter.serial", i.SerialNumber),
+				attribute.String("inverter.type", strconv.Itoa(i.DevType)),
+			)
+			power.Record(ctx, int64(i.LastReportWatts), attrs)
+			maxPower.Record(ctx, int64(i.MaxReportWatts), attrs)
+			lastReport.Record(ctx, int64(i.LastReportDate), attrs)
 		}
+		log.Printf("fetch complete. %d inverters", len(inverters))
 
-		updatedInverters := []inverterReport{}
-
-		for _, inverter := range inverters {
-			updated := updateInverters(inverter)
-			if updated && !first {
-				updatedInverters = append(updatedInverters, inverter)
-			}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
-
-		if len(updatedInverters) > 0 {
-			process(*serial, updatedInverters)
-		}
-
-		first = false
-		log.Printf("fetch complete.  %d inverters, %d updates", len(inverters), len(updatedInverters))
 	}
 }
 
-func makeClient() *http.Client {
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	return &http.Client{Transport: tr}
-}
-
-func makeRequest(ctx context.Context, token string, address string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
+func fetch(ctx context.Context, token string, url string) ([]inverterReport, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -173,36 +146,17 @@ func makeRequest(ctx context.Context, token string, address string) ([]byte, err
 	}
 	defer resp.Body.Close()
 
-	content, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	return content, nil
-}
-
-func process(serial string, items []inverterReport) {
-	writeAPI := db.WriteAPI("flame", "envoy")
-	errorsCh := writeAPI.Errors()
-	go func() {
-		for err := range errorsCh {
-			log.Printf("influx write error: %v", err)
-		}
-	}()
-
-	for _, i := range items {
-		tags := map[string]string{
-			"envoySerial": serial,
-			"serial":      i.SerialNumber,
-			"type":        fmt.Sprintf("%d", i.DevType),
-		}
-		fields := map[string]interface{}{
-			"power":    i.LastReportWatts,
-			"maxPower": i.MaxReportWatts,
-		}
-		ts := time.Unix(int64(i.LastReportDate), 0)
-		p := influxdb2.NewPoint("inverterPower", tags, fields, ts)
-		writeAPI.WritePoint(p)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: %s: %s", url, resp.Status, body)
 	}
 
-	writeAPI.Flush()
+	var inverters []inverterReport
+	if err := json.Unmarshal(body, &inverters); err != nil {
+		return nil, fmt.Errorf("%s: %w", url, err)
+	}
+	return inverters, nil
 }
