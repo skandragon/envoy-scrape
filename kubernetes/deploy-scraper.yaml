@@ -28,6 +28,12 @@ spec:
             value: "1234"
           - name: ENVOY_TOKEN
             value: "..." # should likely be in a secret
+          - name: ENLIGHTEN_EMAIL # optional, enables array layout
+            value: "..."
+          - name: ENLIGHTEN_PASSWORD
+            value: "..." # should likely be in a secret
+          - name: OTEL_SERVICE_NAME
+            value: envoy-scraper
           - name: OTEL_EXPORTER_OTLP_ENDPOINT
             value: http://collector-agent.cardinalhq.svc.cluster.local:4317
         resources:
